@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Чёрная дыра | Чистая физика + гравитационная линза</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: black; font-family: 'Segoe UI', monospace; touch-action: none; }
+        .info-badge {
+            position: fixed; top: 18px; right: 18px; background: #000000aa; backdrop-filter: blur(10px);
+            padding: 6px 18px; border-radius: 40px; font-size: 11px; color: #ffaa77;
+            font-family: monospace; z-index: 200; border-right: 2px solid #ff6633;
+            pointer-events: none;
+        }
+        .hint {
+            position: fixed; bottom: 20px; left: 20px; font-size: 9px; background: #000000aa;
+            border-radius: 24px; padding: 5px 14px; color: #ffaa88; backdrop-filter: blur(5px); z-index: 200;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-badge">🌀 ГРАВИТАЦИОННОЕ ЛИНЗИРОВАНИЕ • АККРЕЦИОННЫЙ ДИСК</div>
+    <div class="hint">🖱️ МЫШЬ/ТАЧ — вращение камеры | КОЛЁСИКО — зум</div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ========== ФИЗИЧЕСКИЕ КОНСТАНТЫ ==========
+        const G = 6.67430e-11;
+        const c = 299792458.0;
+        const M_SOLAR = 1.98892e30;
+        
+        let currentMass = 6.8;      // солнечных масс
+        const visualScale = 3.2e10;   // масштаб для отображения
+        
+        function getRs() { return (2.0 * G * (currentMass * M_SOLAR)) / (c * c); }
+        let currentRs = getRs();
+        
+        // ========== СЦЕНА ==========
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+        
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 2000);
+        camera.position.set(0, 1.5, 17);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+        
+        // ========== ЧЁРНАЯ СФЕРА ==========
+        const blackHoleGeo = new THREE.SphereGeometry(1.0, 512, 512);
+        const blackMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x000000, roughness: 0.1, metalness: 0.99 });
+        const blackHole = new THREE.Mesh(blackHoleGeo, blackMat);
+        scene.add(blackHole);
+        
+        function updateBlackHoleScale() {
+            const rsVis = currentRs / visualScale;
+            const scale = Math.min(3.8, Math.max(1.6, rsVis * 2.7));
+            blackHole.scale.setScalar(scale);
+        }
+        updateBlackHoleScale();
+        
+        // ========== ТЕКСТУРА ДИСКА ==========
+        const createDiskTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const cx = canvas.width/2, cy = canvas.height/2;
+            
+            for (let r = 0.05; r <= 0.98; r += 0.003) {
+                const rad = r * cx;
+                const intensity = Math.pow(1 - r, 1.0) * 1.9;
+                const grad = ctx.createRadialGradient(cx, cy, rad * 0.2, cx, cy, rad);
+                grad.addColorStop(0, `rgba(255, 160, 60, ${intensity * 1.0})`);
+                grad.addColorStop(0.4, `rgba(255, 130, 50, ${intensity * 0.95})`);
+                grad.addColorStop(0.7, `rgba(255, 110, 45, ${intensity * 0.85})`);
+                grad.addColorStop(1, `rgba(240, 90, 40, ${intensity * 0.7})`);
+                ctx.beginPath();
+                ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+                ctx.fillStyle = grad;
+                ctx.fill();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(3.5, 1.2);
+            return tex;
+        };
+        
+        const diskTex = createDiskTexture();
+        
+        // ========== АККРЕЦИОННЫЕ ДИСКИ ==========
+        // Основной внешний диск
+        const mainRingGeo = new THREE.RingGeometry(1.4, 8.5, 600);
+        const mainDiskMat = new THREE.MeshStandardMaterial({ map: diskTex, color: 0xffaa66, emissive: 0xff4411, emissiveIntensity: 1.35, transparent: false, opacity: 1.0, side: THREE.DoubleSide });
+        const mainDisk = new THREE.Mesh(mainRingGeo, mainDiskMat);
+        mainDisk.rotation.x = Math.PI / 2;
+        scene.add(mainDisk);
+        
+        // Внешний слой
+        const outerRingGeo = new THREE.RingGeometry(7.2, 12.0, 640);
+        const outerDiskMat = new THREE.MeshStandardMaterial({ map: diskTex, color: 0xff8844, emissive: 0xff3311, emissiveIntensity: 1.15, transparent: false, opacity: 1.0, side: THREE.DoubleSide });
+        const outerDisk = new THREE.Mesh(outerRingGeo, outerDiskMat);
+        outerDisk.rotation.x = Math.PI / 2;
+        scene.add(outerDisk);
+        
+        // Билборд (внутреннее кольцо, всегда смотрит на камеру)
+        const billboardGeo = new THREE.RingGeometry(1.12, 3.8, 600);
+        const billboardMat = new THREE.MeshStandardMaterial({ map: diskTex, color: 0xffaa55, emissive: 0xff5522, emissiveIntensity: 1.7, transparent: false, opacity: 1.0, side: THREE.DoubleSide });
+        const billboardRing = new THREE.Mesh(billboardGeo, billboardMat);
+        scene.add(billboardRing);
+        
+        function updateBillboard() {
+            const camDir = new THREE.Vector3().subVectors(camera.position, blackHole.position).normalize();
+            const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), camDir);
+            billboardRing.quaternion.copy(quaternion);
+        }
+        
+        // ========== ЗВЁЗДЫ ==========
+        // Обычные звёзды (фон)
+        const normalStarCount = 60000;
+        const normalStarPos = new Float32Array(normalStarCount * 3);
+        const normalStarColors = new Float32Array(normalStarCount * 3);
+        for (let i = 0; i < normalStarCount; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const r = 20 + Math.random() * 180;
+            normalStarPos[i*3] = r * Math.sin(phi) * Math.cos(theta);
+            normalStarPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+            normalStarPos[i*3+2] = r * Math.cos(phi);
+            const b = 0.5 + Math.random() * 0.5;
+            normalStarColors[i*3] = b;
+            normalStarColors[i*3+1] = b * 0.9;
+            normalStarColors[i*3+2] = b * 0.7;
+        }
+        const normalStarGeo = new THREE.BufferGeometry();
+        normalStarGeo.setAttribute('position', new THREE.BufferAttribute(normalStarPos, 3));
+        normalStarGeo.setAttribute('color', new THREE.BufferAttribute(normalStarColors, 3));
+        const normalStars = new THREE.Points(normalStarGeo, new THREE.PointsMaterial({ size: 0.14, vertexColors: true, transparent: true, opacity: 0.8 }));
+        scene.add(normalStars);
+        
+        // Звёзды на контуре линзирования
+        const lensStarCount = 8000;
+        const lensStarOriginalPos = new Float32Array(lensStarCount * 3);
+        const lensStarColors = new Float32Array(lensStarCount * 3);
+        for (let i = 0; i < lensStarCount; i++) {
+            const baseRadius = 2.2 + Math.random() * 2.5;
+            const angle = Math.random() * Math.PI * 2;
+            const yOffset = (Math.random() - 0.5) * 0.8;
+            lensStarOriginalPos[i*3] = Math.cos(angle) * baseRadius;
+            lensStarOriginalPos[i*3+1] = yOffset;
+            lensStarOriginalPos[i*3+2] = Math.sin(angle) * baseRadius;
+            const b = 0.7 + Math.random() * 0.5;
+            lensStarColors[i*3] = 1.0;
+            lensStarColors[i*3+1] = 0.6 + Math.random() * 0.4;
+            lensStarColors[i*3+2] = 0.2 + Math.random() * 0.3;
+        }
+        const lensStarGeo = new THREE.BufferGeometry();
+        lensStarGeo.setAttribute('position', new THREE.BufferAttribute(lensStarOriginalPos.slice(), 3));
+        lensStarGeo.setAttribute('color', new THREE.BufferAttribute(lensStarColors, 3));
+        const lensStars = new THREE.Points(lensStarGeo, new THREE.PointsMaterial({ size: 0.12, vertexColors: true, blending: THREE.AdditiveBlending }));
+        scene.add(lensStars);
+        
+        // Гравитационное линзирование звёзд на контуре
+        function applyGravitationalLensing() {
+            const massFactor = (currentMass - 2.5) / 15.0;
+            const strength = Math.min(1.1, massFactor * 1.4);
+            const horizonScale = blackHole.scale.x;
+            const positions = lensStarGeo.attributes.position.array;
+            for (let i = 0; i < lensStarCount; i++) {
+                let x = lensStarOriginalPos[i*3];
+                let y = lensStarOriginalPos[i*3+1];
+                let z = lensStarOriginalPos[i*3+2];
+                const dist = Math.sqrt(x*x + y*y + z*z);
+                if (dist < 0.5) continue;
+                const gf = strength * Math.min(1.2, horizonScale * 1.8 / Math.max(0.3, dist));
+                const angle = Math.atan2(z, x);
+                const newAngle = angle + gf * 0.8 * Math.sin(angle * 3);
+                const radialStretch = 1.0 + gf * 0.9;
+                let nx = Math.cos(newAngle) * dist * radialStretch;
+                let nz = Math.sin(newAngle) * dist * radialStretch;
+                let ny = y * (1.0 - gf * 0.5);
+                positions[i*3] = nx;
+                positions[i*3+1] = ny;
+                positions[i*3+2] = nz;
+            }
+            lensStarGeo.attributes.position.needsUpdate = true;
+        }
+        
+        // ========== ПЫЛЕВЫЕ ЧАСТИЦЫ ==========
+        const dustCount = 35000;
+        const dustPos = new Float32Array(dustCount * 3);
+        const dustCol = new Float32Array(dustCount * 3);
+        for (let i = 0; i < dustCount; i++) {
+            const r = 1.6 + Math.random() ** 1.2 * 11.5;
+            const ang = Math.random() * Math.PI * 2;
+            const yoff = (Math.random() - 0.5) * 0.65;
+            dustPos[i*3] = Math.cos(ang) * r;
+            dustPos[i*3+1] = yoff;
+            dustPos[i*3+2] = Math.sin(ang) * r;
+            const heat = 0.3 + Math.random() * 0.85;
+            dustCol[i*3] = 1.0;
+            dustCol[i*3+1] = 0.25 + heat * 0.7;
+            dustCol[i*3+2] = 0.1;
+        }
+        const dustGeo = new THREE.BufferGeometry();
+        dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+        dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
+        const dustPoints = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.06, vertexColors: true, blending: THREE.AdditiveBlending }));
+        scene.add(dustPoints);
+        
+        // ========== ОСВЕЩЕНИЕ ==========
+        const ambient = new THREE.AmbientLight(0x111111);
+        scene.add(ambient);
+        const diskLight = new THREE.PointLight(0xff6622, 2.4, 70);
+        diskLight.position.set(1.2, 0.6, 1.8);
+        scene.add(diskLight);
+        
+        // ========== КАМЕРА (полное вращение) ==========
+        let theta = 0.9, phi = 0.85, radius = 17;
+        let isDrag = false, lastX = 0, lastY = 0;
+        let isPinch = false, lastPinch = 0;
+        
+        function updateCamera() {
+            const x = Math.sin(theta) * Math.sin(phi) * radius;
+            const y = Math.cos(phi) * radius;
+            const z = Math.cos(theta) * Math.sin(phi) * radius;
+            camera.position.set(x, y, z);
+            camera.lookAt(0, 0, 0);
+            updateBillboard();
+            applyGravitationalLensing();
+        }
+        
+        function handleStart(e) {
+            e.preventDefault();
+            if (e.touches) {
+                if (e.touches.length === 1) { isDrag = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+                else if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    lastPinch = Math.hypot(dx, dy); isPinch = true;
+                }
+            } else { isDrag = true; lastX = e.clientX; lastY = e.clientY; }
+        }
+        
+        function handleMove(e) {
+            e.preventDefault();
+            if (isDrag && !isPinch) {
+                let cx, cy;
+                if (e.touches) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
+                else { cx = e.clientX; cy = e.clientY; }
+                const dx = cx - lastX, dy = cy - lastY;
+                theta += dx * 0.009;
+                phi += dy * 0.009;
+                phi = Math.min(Math.PI - 0.05, Math.max(0.05, phi));
+                lastX = cx; lastY = cy;
+                updateCamera();
+            } else if (isPinch && e.touches && e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const newDist = Math.hypot(dx, dy);
+                radius += (lastPinch - newDist) * 0.035;
+                radius = Math.min(180, Math.max(1.2, radius));
+                lastPinch = newDist;
+                updateCamera();
+            }
+        }
+        
+        function handleEnd() { isDrag = false; isPinch = false; }
+        
+        window.addEventListener('touchstart', handleStart, { passive: false });
+        window.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
+        window.addEventListener('mousedown', handleStart);
+        window.addEventListener('mousemove', (e) => { if (isDrag && !isPinch) handleMove(e); });
+        window.addEventListener('mouseup', handleEnd);
+        window.addEventListener('wheel', (e) => {
+            radius += e.deltaY * 0.03;
+            radius = Math.min(185, Math.max(1.0, radius));
+            updateCamera();
+        });
+        
+        // ========== АНИМАЦИЯ ==========
+        let rotAngle = 0;
+        let lastTime = 0;
+        let lensCounter = 0;
+        
+        function animate(now) {
+            const delta = Math.min(0.033, (now - lastTime) / 1000);
+            lastTime = now;
+            
+            const spin = 0.032;
+            rotAngle += spin;
+            mainDisk.rotation.z = rotAngle;
+            outerDisk.rotation.z = rotAngle * 0.96;
+            dustPoints.rotation.y = rotAngle * 0.99;
+            
+            lensCounter++;
+            if (lensCounter % 2 === 0) applyGravitationalLensing();
+            
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        
+        updateCamera();
+        applyGravitationalLensing();
+        requestAnimationFrame(animate);
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        console.log('Чёрная дыра | Чистая физика | Гравитационная линза | Вращение камеры');
+    </script>
+</body>
+</html>
